@@ -15,9 +15,9 @@
 mbed側パラメタ設定
 ------------- */
 Timer TIMER;               // タイマー
-AnalogIn TARGET(p15);      // 流量or圧力調整 ***
+//AnalogIn TARGET(p15);      // 流量or圧力調整 ***
 AnalogIn INTIME(p16);      // 吸気時間調整
-AnalogIn MODE(p17);        // モード切替[0:VCV][1:PCV] ***
+//AnalogIn MODE(p17);        // モード切替[0:VCV][1:PCV] ***
 AnalogOut CONTROL(p18);    // 制御入力
 AnalogIn FLOW(p19);        // 流量センサ
 AnalogIn PRESSURE(p20);    // 圧力センサ
@@ -49,7 +49,7 @@ float p,d;                 // PD制御
 float TriggerRaw;          // 流量センサの生値を物理量に変換
 float TriggerLPF[2];       // 1次のデジタルLPFを施行
 // プログラム終了トリガ（仮）
-float preMODE = MODE;
+float preMODE = 0;
 int EndTrigger = 0;
 
 
@@ -76,7 +76,6 @@ int main(){
     ---- */
     CONTROL = minCnt/3.3;
     wait(5);                 // 最初は5秒間待機
-    MODE = 0
 
     /* ----
     制御開始
@@ -125,10 +124,10 @@ int main(){
         }
         // 随意トリガ用パラメタの前回値を記憶
         TriggerLPF[0] = TriggerLPF[1];
-        if(abs(MODE-preMODE)>0.9){
+        if(abs(preMODE-preMODE)>0.9){
             EndTrigger++;
         }
-        preMODE = MODE;
+        preMODE = 0;
     }
 }
 
@@ -141,12 +140,11 @@ void RespiratoryAssist(){
     /* -----------
     流量or圧力の調整
     ----------- */
-    TARGET = 1.0
-    if(MODE<0.5){
-        target = TARGET*1.2 + 2.1;                                   // 正確には(3.3*TARGET)*(0.800/3.3)+2.5 ***
+    if(preMODE<0.5){
+        target = 1.2 + 2.1;                                   // 正確には(3.3*TARGET)*(0.800/3.3)+2.5 ***
     }
     else{
-        target = TARGET*1.911 + 1.389;                                 // 正確には(3.3*TARGET)*(1.911/3.3)+1.389 ***
+        target = 1.911 + 1.389;                                 // 正確には(3.3*TARGET)*(1.911/3.3)+1.389 ***
     }
 
     /* ----------------
@@ -172,7 +170,7 @@ void RespiratoryAssist(){
             TriggerRaw = 37.5*(3.3*FLOW) - 68.75;
             TriggerLPF[1] = 0.8*TriggerLPF[0] + 0.2*TriggerRaw;
             // P:比例制御 ***
-            if(MODE<0.5){
+            if(preMODE<0.5){
                 raw = 3.3*FLOW;
             }else{
                 raw = 3.3*PRESSURE;
@@ -184,7 +182,7 @@ void RespiratoryAssist(){
             d = (ControlCycleCount==0) ? 0 : (e[1]-e[0])/dt;             // 原始ループでのD制御は不実施
             // PD:比例微分制御 ***
             preCONTROL = (ControlCycleCount==0) ? minCnt*2 : preCONTROL; // 原始ループでのpreCONTROLはminCnt*2に設定
-            if(MODE<0.5){
+            if(preMODE<0.5){
                 checkCONTROL = preCONTROL + kpV*p + kdV*d;                 // PD制御 ***
             }else{
                 checkCONTROL = preCONTROL + kpP*p + kdP*d;

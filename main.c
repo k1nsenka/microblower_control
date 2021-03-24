@@ -140,7 +140,6 @@ int main(){
 --------------- */
 
 void RespiratoryAssist(){
-
     /* -----------
     流量or圧力の調整
     ----------- */
@@ -189,7 +188,8 @@ void RespiratoryAssist(){
             if(MODE<0.5){
                 checkCONTROL = preCONTROL + kpV*p + kdV*d;                 // PD制御 ***
             }else{
-                checkCONTROL = preCONTROL + kpP*p + kdP*d;
+                checkCONTROL = preCONTROL + kpP*p + kdP*d;z590
+                zzzzfryjtfutjf
             }
             // [min-max]の範囲内に入っているかの確認
             if((minCnt<checkCONTROL)&&(checkCONTROL<maxCnt)){
