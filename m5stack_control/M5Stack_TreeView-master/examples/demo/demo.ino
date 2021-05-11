@@ -25,7 +25,7 @@ void drawFrame() {
   M5.Lcd.drawRect(r.x -1, r.y, r.w +2, r.h, MenuItem::frameColor[1]);
   M5.Lcd.drawRect(r.x, r.y -1, r.w, r.h +2, MenuItem::frameColor[1]);
 }
-
+  
 void FileView(File ff){
   M5.Lcd.setTextColor(0xffff,0);
   M5.Lcd.setCursor(0,0);
