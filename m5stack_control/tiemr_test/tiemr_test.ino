@@ -25,7 +25,7 @@ int startCheck = 0;
 void IRAM_ATTR usecTimer()
 {
   portENTER_CRITICAL_ISR(&mutex);
-  usecCount += 5;
+  usecCount += 1;
   portEXIT_CRITICAL_ISR(&mutex);
 }
 
@@ -57,7 +57,7 @@ void setup()
   //interrupt method setting
   timerAttachInterrupt(interrupptTimer, &usecTimer, true);
   //interrupt timing setting.
-  timerAlarmWrite(interrupptTimer, 5, true);
+  timerAlarmWrite(interrupptTimer, 1000, true);
   timerAlarmDisable(interrupptTimer);
   //timerAlarmEnable(interupptTimer);
 }
@@ -117,8 +117,8 @@ void loop()
   }
 
   //time calculation
-  display[1] = (int)((usecCount / 1000000) % 60);
-  display[0] = (int)((usecCount / 60000000) % 3600);
+  display[1] = (int)(usecCount / 1000);
+  display[0] = (int)(usecCount / 60000);
 
   //count display
   //portENTER_CRITICAL(&mutex);

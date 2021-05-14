@@ -102,7 +102,7 @@ int main(){
         TriggerRaw = 37.5*(3.3*FLOW) - 68.75;
         TriggerLPF[1] = 0.8*TriggerLPF[0] + 0.2*TriggerRaw;
         // GoSignの更新
-        if((GoSign==0)&&(TriggerLPF[1]<11)){
+        if((GoSign==0)&&(TriggerLPF[1]<14)){
             GoSign = 1;
         }
 
@@ -188,8 +188,7 @@ void RespiratoryAssist(){
             if(MODE<0.5){
                 checkCONTROL = preCONTROL + kpV*p + kdV*d;                 // PD制御 ***
             }else{
-                checkCONTROL = preCONTROL + kpP*p + kdP*d;z590
-                zzzzfryjtfutjf
+                checkCONTROL = preCONTROL + kpP*p + kdP*d;
             }
             // [min-max]の範囲内に入っているかの確認
             if((minCnt<checkCONTROL)&&(checkCONTROL<maxCnt)){

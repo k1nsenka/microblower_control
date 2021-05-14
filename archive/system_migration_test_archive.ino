@@ -13,7 +13,7 @@ define
 #define minCnt 0.505       // 遠心ポンプのドライバが駆動する制御電圧の下限
 #define maxCnt 3.205       // 回路的に念のために設ける上限
 // 制御周期
-#define ControlCycle 0.002  // 50Hzの制御周期
+#define ControlCycle 0.02  // 50Hzの制御周期
 //　m5stackのボタンピン番号
 #define BUTTONA 39
 #define BUTTONB 38
@@ -32,7 +32,7 @@ define
 制御パラメタ設定
 ------------- */
 int TARGET = 1;      // 流量or圧力調整 ***
-int INTIME = 0;      // 吸気時間調整
+int INTIME = 1;      // 吸気時間調整
 int MODE = 0;        // モード切替[0:VCV][1:PCV] ***
 
 /* ----------------
@@ -46,7 +46,7 @@ void IRAM_ATTR usecTimer();
 ---------------------------------------- */
 // ボリューム用パラメタ
 float target;              // 流量or圧力対応 ***
-float intime;              // 吸気時間対応
+//float intime;              // 吸気時間対応
 // PD制御用パラメタ
 float raw;                 // 流量or圧力センサの生値 ***
 float e[2];                // 制御偏差
@@ -71,6 +71,24 @@ int display[2] = {0};
 int countStart = 0;
 int startCheck = 0;
 
+/* -------------------------------------
+main関数内でのみ扱う変数：local変数として宣言
+------------------------------------- */
+// 自律トリガ用パラメタ
+//float backup = 0;
+// 随意トリガ用パラメタ
+int GoSign = 0;          // 定常状態にまで落ちてきたらONになる
+//自立カウント用
+int count = 0;
+/* --------------
+自律トリガ用パラメタ
+-------------- */
+// 吸気時間の調整
+float intime = 2.0;
+//intime = INTIME+2;   // 正確には(3.3*INTIME)*(2/3.3)+2
+// バックアップ換気の間隔
+float backup = intime*2;     // I:E比の比率だけ乗算
+
 
 void setup() {
     M5.begin();
@@ -85,21 +103,17 @@ void setup() {
     /* ------
     タイマー設定
     ------ */
-    //timerBegin is count per 1 microsec.
+    //timerBegin is count per 100 microsec.
     interrupptTimer = timerBegin(0, 80, true);
     //interrupt method setting
     timerAttachInterrupt(interrupptTimer, &usecTimer, true);
     //interrupt timing setting.
-    timerAlarmWrite(interrupptTimer, 1000, true);
+    timerAlarmWrite(interrupptTimer, 5, true);
     timerAlarmDisable(interrupptTimer);
     /* ---------
     ディスプレイ設定
     --------- */
-    M5.Lcd.setCursor(10, 10);
-    M5.Lcd.clear(BLACK);
-    M5.Lcd.setTextColor(RED, BLACK);
-    M5.Lcd.setTextSize(4);
-    M5.Lcd.print("SYSTEM\n ACTIVATE\n");
+    M5.Lcd.fillScreen(WHITE);
 
     /* --------------------
     制御開始までにLEDを3回点滅
@@ -115,98 +129,92 @@ void setup() {
     /* ----
     初期設定
     ---- */
-    dacWrite(CONTROL, minCnt*255/3.3);
+    dacWrite(CONTROL, minCnt/3.3);
     delay(5000);                 // 最初は5秒間待機
 
-    /* ----
-    制御開始
-    ---- */
+    /* -------
+    タイマー開始
+    ------- */
     timerAlarmEnable(interrupptTimer);
-    M5.Lcd.setCursor(10, 10);
-    M5.Lcd.clear(BLACK);
-    M5.Lcd.setTextColor(RED, BLACK);
-    M5.Lcd.setTextSize(4);
-    M5.Lcd.print("WAITING\n");
 }
 
 
 void loop() {
-    /* -------------------------------------
-    main関数内でのみ扱う変数：local変数として宣言
-    ------------------------------------- */
-    // 自律トリガ用パラメタ
-    float backup = 0;
-    // 随意トリガ用パラメタ
-    int GoSign = 0;          // 定常状態にまで落ちてきたらON
-
-    while(EndTrigger < 8){
-        /* --------------
-        自律トリガ用パラメタ
-        -------------- */
-        // 吸気時間の調整
-        intime = 3.0;
-        //intime = INTIME+2;   // 正確には(3.3*INTIME)*(2/3.3)+2
-        // バックアップ換気の間隔
-        backup = intime*2;     // I:E比の比率だけ乗算
-
-        /* --------------
-        随意トリガ用パラメタ
-        -------------- */
-        // 流量センサ値の物理量化と平滑化
-        TriggerRaw = 37.5*(analogRead(FLOW)/4096)*3.3 - 68.75;
-        TriggerLPF[1] = 0.8*TriggerLPF[0] + 0.2*TriggerRaw;
-        // GoSignの更新
-        if((GoSign==0)&&(TriggerLPF[1]<11)){
-            GoSign = 1;
-        }
-
-        /* ----
-        吸気支援
-        ---- */
-        // 随意制御
-        if((GoSign==1)&&(17<TriggerLPF[1])&&((usecCount / 1000)>1)){
-            digitalWrite(TRIGGER, HIGH);
-            digitalWrite(ASSIST, HIGH);
-            M5.Lcd.setCursor(10, 10);
-            M5.Lcd.clear(BLACK);
-            M5.Lcd.setTextColor(RED, BLACK);
-            M5.Lcd.setTextSize(3);
-            M5.Lcd.print("V ASSIST\n");
-            display[1] = (int)(usecCount / 1000);
-            display[0] = (int)(usecCount / 60000);
-            M5.Lcd.printf(" m: s: ms: us\n");
-            M5.Lcd.printf("%02d:",display[0]);
-            M5.Lcd.printf("%02d:\n",display[1]);
-            RespiratoryAssist();
-            digitalWrite(TRIGGER, LOW);
-            digitalWrite(ASSIST, LOW);
-            GoSign = 0;
-        }
-        // 自律制御
-        if((usecCount/1000)>backup){
-            digitalWrite(ASSIST, HIGH);
-            M5.Lcd.setCursor(10, 10);
-            M5.Lcd.clear(BLACK);
-            M5.Lcd.setTextColor(RED, BLACK);
-            M5.Lcd.setTextSize(4);
-            M5.Lcd.print("A ASSIST\n");
-            display[1] = (int)(usecCount / 1000);
-            display[0] = (int)(usecCount / 60000);
-            M5.Lcd.printf(" m: s\n");
-            M5.Lcd.printf("%02d:",display[0]);
-            M5.Lcd.printf("%02d:\n",display[1]);
-            RespiratoryAssist();
-            digitalWrite(ASSIST, LOW);
-            GoSign = 0;
-        }
-        
-        // 随意トリガ用パラメタの前回値を記憶
-        TriggerLPF[0] = TriggerLPF[1];
-        if(abs(MODE-preMODE)>0.9){
-            EndTrigger++;
-        }
-        preMODE = MODE;
+    /* ----
+    制御開始
+    ---- */
+    M5.Lcd.setCursor(10, 10);
+    M5.Lcd.clear(WHITE);
+    M5.Lcd.setTextColor(RED, BLACK);
+    M5.Lcd.setTextSize(3);
+    M5.Lcd.print("BACKUP\n");
+    display[1] = (int)((usecCount / 1000000) % 60);
+    display[0] = (int)((usecCount / 60000000) % 3600);
+    M5.Lcd.printf(" m: s: ms: us\n");
+    M5.Lcd.printf("%02d:",display[0]);
+    M5.Lcd.printf("%02d:",display[1]);
+    /* --------------
+    随意トリガ用パラメタ
+    -------------- */
+    // 流量センサ値の物理量化と平滑化
+    TriggerRaw = 37.5*(3.3*analogRead(FLOW)/4096) - 68.75;
+    TriggerLPF[1] = 0.8*TriggerLPF[0] + 0.2*TriggerRaw;
+    // GoSignの更新
+    if((GoSign==0)&&(TriggerLPF[1]<11)){
+        GoSign = 1;
     }
+
+    /* ----
+    吸気支援
+    ---- */
+    /*
+    // 随意制御
+    if((GoSign==1)&&(17<TriggerLPF[1])&&((int)((usecCount / 1000000) % 60)>1)){
+        digitalWrite(TRIGGER, HIGH);
+        digitalWrite(ASSIST, HIGH);
+        M5.Lcd.setCursor(10, 10);
+        M5.Lcd.clear(WHITE);
+        M5.Lcd.setTextColor(RED, BLACK);
+        M5.Lcd.setTextSize(3);
+        M5.Lcd.print("Voluntary control\n");
+        display[1] = (int)((usecCount / 1000000) % 60);
+        display[0] = (int)((usecCount / 60000000) % 3600);
+        M5.Lcd.printf(" m: s: ms: us\n");
+        M5.Lcd.printf("%02d:",display[0]);
+        M5.Lcd.printf("%02d:",display[1]);
+        RespiratoryAssist();
+        digitalWrite(TRIGGER, LOW);
+        digitalWrite(ASSIST, LOW);
+        GoSign = 0;
+    }
+    */
+
+    // 自律制御
+    if((int)((usecCount / 1000000) % 60)>backup){
+        digitalWrite(ASSIST, HIGH);
+        count++;
+        M5.Lcd.setCursor(10, 10);
+        M5.Lcd.clear(WHITE);
+        M5.Lcd.setTextColor(RED, BLACK);
+        M5.Lcd.setTextSize(3);
+        M5.Lcd.print("Autonomous control\n");
+        display[1] = (int)((usecCount / 1000000) % 60);
+        display[0] = (int)((usecCount / 60000000) % 3600);
+        M5.Lcd.printf(" m: s: ms: us\n");
+        M5.Lcd.printf("%02d:",display[0]);
+        M5.Lcd.printf("%02d:\n",display[1]);
+        M5.Lcd.printf("count :%d:",count);
+        RespiratoryAssist();
+        digitalWrite(ASSIST, LOW);
+        GoSign = 0;
+    }
+    
+    // 随意トリガ用パラメタの前回値を記憶
+    TriggerLPF[0] = TriggerLPF[1];
+    if(abs(MODE-preMODE)>0.9){
+        EndTrigger++;
+    }
+    preMODE = MODE;
 }
 
 
@@ -238,19 +246,19 @@ void RespiratoryAssist(){
     /* -------
     吸気支援開始
     ------- */
-    while((usecCount/1000)<intime){
+    while((int)((usecCount / 1000000) % 60)<intime){
         // 制御周期を一定で実施
-        if((usecCount / 1000)>ControlCycleCount){
+        if((int)((usecCount / 1000000) % 60)>ControlCycleCount){
             // D制御のための時間記憶
-            t[1] = usecCount / 1000;  // 時間を記憶
+            t[1] = (int)((usecCount / 1000000) % 60);  // 時間を記憶
             // 自発呼吸トリガ用パラメタ
-            TriggerRaw = 37.5*(analogRead(FLOW)/4096)*3.3 - 68.75;
+            TriggerRaw = 37.5*(3.3*analogRead(FLOW)/4096) - 68.75;
             TriggerLPF[1] = 0.8*TriggerLPF[0] + 0.2*TriggerRaw;
             // P:比例制御 ***
             if(MODE<0.5){
-                raw = (analogRead(FLOW)/4096)*3.3;
+                raw = 3.3*analogRead(FLOW)/4096;
             }else{
-                raw = (analogRead(PRESSURE)/4096)*3.3;
+                raw = 3.3*analogRead(PRESSURE)/4096;
             }
             e[1] = target - raw;                                         // 偏差を記憶 ***
             p = (ControlCycleCount==0) ? 0 : e[1];                       // 原始ループでのP制御は不実施
@@ -266,13 +274,14 @@ void RespiratoryAssist(){
             }
             // [min-max]の範囲内に入っているかの確認
             if((minCnt<checkCONTROL)&&(checkCONTROL<maxCnt)){
-                dacWrite(CONTROL, preCONTROL=(checkCONTROL/3.3)*255);
+                dacWrite(CONTROL, checkCONTROL*255/3.3);
             }else if(checkCONTROL<minCnt){
-                dacWrite(CONTROL, preCONTROL=(minCnt/3.3)*255);
+                dacWrite(CONTROL, minCnt*255/3.3);
             }else if(maxCnt<checkCONTROL){
-                dacWrite(CONTROL, preCONTROL=(maxCnt/3.3)*255);
+                dacWrite(CONTROL, maxCnt*255/3.3);
             }
             // 各パラメタの前回値を記憶
+            preCONTROL = analogRead(CONTROL)*3.3/4096;
             e[0] = e[1];
             TriggerLPF[0] = TriggerLPF[1];
             t[0] = t[1];
@@ -287,18 +296,13 @@ void RespiratoryAssist(){
     // 待機設定に戻す
     e[0] = 0; e[1] = 0;
     t[0] = 0; t[1] = 0;
-    M5.Lcd.setCursor(10, 10);
-    M5.Lcd.clear(BLACK);
-    M5.Lcd.setTextColor(RED, BLACK);
-    M5.Lcd.setTextSize(3);
-    M5.Lcd.print("WAITING\n");
-    dacWrite(CONTROL, (minCnt/3.3)*255);
+    dacWrite(CONTROL, minCnt*255/3.3);
     usecCount = 0;
     timerAlarmEnable(interrupptTimer);
 }
 
 void IRAM_ATTR usecTimer(){
     portENTER_CRITICAL_ISR(&mutex);
-    usecCount += 1;
+    usecCount += 5;
     portEXIT_CRITICAL_ISR(&mutex);
 }
