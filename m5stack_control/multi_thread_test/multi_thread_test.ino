@@ -1,5 +1,8 @@
 #include<M5Stack.h>
+#include<M5TreeView.h>
 
+M5TreeView treeView;
+typedef std::vector<MenuItem*> vmi;
 
 /* ------
 define
@@ -22,7 +25,7 @@ define
 #define CONTROL 26    // 制御入力
 #define FLOW 35        // 流量センサ
 #define PRESSURE 36    // 圧力センサ
-#define ASSIST 1    // 支援信号
+#define ASSIST 0    // 支援信号
 #define TRIGGER 17   // トリガ信号
 // ディスプレイ用
 #define LCDHIGH 240
@@ -39,6 +42,8 @@ int MODE = 0;        // モード切替[0:VCV][1:PCV] ***
 関数のプロトタイプ宣言
 ---------------- */
 void RespiratoryAssist();
+void test_task0(void *arg);
+void test_task1(void *arg);
 
 /* ----------------------------------------
 吸気支援関数内で主に扱う変数：global変数として宣言
@@ -62,9 +67,6 @@ float preMODE = MODE;
 int EndTrigger = 0;
 // タイマーの変数
 unsigned long start, end, diff;
-// 表示用
-int display[2] = {0};
-
 
 void setup() {
     M5.begin();
@@ -77,152 +79,79 @@ void setup() {
     pinMode(ASSIST, OUTPUT);
     pinMode(TRIGGER, OUTPUT);
     /* ------
-    タイマー設定
+    タスクハンドラ設定
     ------ */
-
-    /* ---------
-    ディスプレイ設定
-    --------- */
-    M5.Lcd.setCursor(10, 10);
-    M5.Lcd.clear(BLACK);
-    //M5.Lcd.setTextColor(RED, BLACK);
-    //M5.Lcd.setTextSize(4);
-    //M5.Lcd.print("SYSTEM\n ACTIVATE\n");
-    //M5.Lcd.clear(BLACK);
-
-    /* --------------------
-    制御開始までにLEDを3回点滅
-    -------------------- */
-    /*
-    LED = 1;
-    for(int i=0;i<6;i++){
-        wait(0.5);
-        LED = !LED;
-    }*/
-    //delay(500);
-    
-
+    TaskHandle_t t0_h;
+    TaskHandle_t t1_h;
     /* ----
-    初期設定
+    タスク割り当て
     ---- */
-    int temp = (int)(minCnt*255/3.3);
-    dacWrite(CONTROL, temp);
-    delay(5000);                 // 最初は5秒間待機
-    start = millis() / 1000;
-
-
-    /* ----
-    制御開始
-    ---- */
-    //M5.Lcd.setCursor(10, 10);
-    //M5.Lcd.clear(BLACK);
-    //M5.Lcd.setTextColor(RED, BLACK);
-    //M5.Lcd.setTextSize(4);
-    //M5.Lcd.print("WAITING\n");
+    xTaskCreatePinnedToCore(test_task0, "test_task0", 4096, NULL, 1, &t0_h, 0);
+    xTaskCreatePinnedToCore(test_task1, "test_task1", 4096, NULL, 10, &t1_h, 1);
 }
-/*
-void loop(){
-    //Serial.println("reset\n");
-    M5.Lcd.setCursor(10, 10);
-    M5.Lcd.clear(BLACK);
-    M5.Lcd.setTextColor(RED, BLACK);
-    M5.Lcd.setTextSize(4);
-    M5.Lcd.print("SYSTEM\n ACTIVATE\n");
-    
-    start = millis() / 2000;
-    end = start;
-    //Serial.print(start-end);
-    diff = start - end;
-    //int temp = INTIME * 1000;
-    while(diff < INTIME){
-        M5.Lcd.clear(BLACK);
-        //Serial.print(start - end);
-        end = millis() / 1000;
-        diff = start - end;
-    }
-}
-*/
-void loop() {
-    /* -------------------------------------
-    main関数内でのみ扱う変数：local変数として宣言
-    ------------------------------------- */
-    // 自律トリガ用パラメタ
-    float backup = 0;
-    // 随意トリガ用パラメタ
-    int GoSign = 0;          // 定常状態にまで落ちてきたらON
 
-    while(EndTrigger < 8){
-        /* --------------
-        自律トリガ用パラメタ
-        -------------- */
-        // 吸気時間の調整
-        intime = 2.0;
-        //intime = INTIME+2;   // 正確には(3.3*INTIME)*(2/3.3)+2
-        // バックアップ換気の間隔
-        backup = intime*2;     // I:E比の比率だけ乗算
-
-        /* --------------
-        随意トリガ用パラメタ
-        -------------- */
-        // 流量センサ値の物理量化と平滑化
-        TriggerRaw = 37.5*(analogRead(FLOW)/4096)*3.3 - 68.75;
-        TriggerLPF[1] = 0.8*TriggerLPF[0] + 0.2*TriggerRaw;
-        // GoSignの更新
-        if((GoSign==0)&&(TriggerLPF[1]<11)){
-            GoSign = 1;
-        }
-
-        /* ----
-        吸気支援
-        ---- */
-        // 随意制御
-        end = millis() / 1000;
-        diff = end - start;
-        /*
-        if((GoSign==1)&&(17<TriggerLPF[1])&&(diff>1)){
-            digitalWrite(TRIGGER, HIGH);
-            digitalWrite(ASSIST, HIGH);
-            //M5.Lcd.setCursor(10, 10);
-            //M5.Lcd.clear(BLACK);
-            //M5.Lcd.setTextColor(RED, BLACK);
-            //M5.Lcd.setTextSize(3);
-            //M5.Lcd.print("V ASSIST\n");
-            //display[1] = (int)(usecCount / 1000);
-            //display[0] = (int)(usecCount / 60000);
-            //M5.Lcd.printf(" m: s: ms: us\n");
-            //M5.Lcd.printf("%02d:",display[0]);
-            //M5.Lcd.printf("%02d:\n",display[1]);
-            RespiratoryAssist();
-            digitalWrite(TRIGGER, LOW);
-            digitalWrite(ASSIST, LOW);
-            GoSign = 0;
-        }*/
-        // 自律制御
-        if(diff>backup){
-            digitalWrite(ASSIST, HIGH);
-            //M5.Lcd.setCursor(10, 10);
-            //M5.Lcd.clear(BLACK);
-            //M5.Lcd.setTextColor(RED, BLACK);
-            //M5.Lcd.setTextSize(4);
-            //M5.Lcd.print("A ASSIST\n");
-            //display[1] = (int)(usecCount / 1000);
-            //display[0] = (int)(usecCount / 60000);
-            //M5.Lcd.printf(" m: s\n");
-            //M5.Lcd.printf("%02d:",display[0]);
-            //M5.Lcd.printf("%02d:\n",display[1]);
-            RespiratoryAssist();
-            digitalWrite(ASSIST, LOW);
-            GoSign = 0;
-        }
-        
-        // 随意トリガ用パラメタの前回値を記憶
-        TriggerLPF[0] = TriggerLPF[1];
-        if(abs(MODE-preMODE)>0.9){
-            EndTrigger++;
-        }
-        preMODE = MODE;
-    }
-}
+void loop(){}
+//void loop() {
+//    /* -------------------------------------
+//    main関数内でのみ扱う変数：local変数として宣言
+//    ------------------------------------- */
+//    // 自律トリガ用パラメタ
+//    float backup = 0;
+//    // 随意トリガ用パラメタ
+//    int GoSign = 0;          // 定常状態にまで落ちてきたらON
+//
+//    while(EndTrigger < 8){
+//        /* --------------
+//        自律トリガ用パラメタ
+//        -------------- */
+//        // 吸気時間の調整
+//        intime = 2.0;
+//        //intime = INTIME+2;   // 正確には(3.3*INTIME)*(2/3.3)+2
+//        // バックアップ換気の間隔
+//        backup = intime*2;     // I:E比の比率だけ乗算
+//
+//        /* --------------
+//        随意トリガ用パラメタ
+//        -------------- */
+//        // 流量センサ値の物理量化と平滑化
+//        TriggerRaw = 37.5*(analogRead(FLOW)/4096)*3.3 - 68.75;
+//        TriggerLPF[1] = 0.8*TriggerLPF[0] + 0.2*TriggerRaw;
+//        // GoSignの更新
+//        if((GoSign==0)&&(TriggerLPF[1]<11)){
+//            GoSign = 1;
+//        }
+//
+//        /* ----
+//        吸気支援
+//        ---- */
+//        // 随意制御
+//        end = millis() / 1000;
+//        diff = end - start;
+//        /*
+//        if((GoSign==1)&&(17<TriggerLPF[1])&&(diff>1)){
+//            digitalWrite(TRIGGER, HIGH);
+//            digitalWrite(ASSIST, HIGH);
+//            RespiratoryAssist();
+//            digitalWrite(TRIGGER, LOW);
+//            digitalWrite(ASSIST, LOW);
+//            GoSign = 0;
+//        }*/
+//        // 自律制御
+//        if(diff>backup){
+//            digitalWrite(ASSIST, HIGH);
+//            RespiratoryAssist();
+//            digitalWrite(ASSIST, LOW);
+//            GoSign = 0;
+//        }
+//        
+//        // 随意トリガ用パラメタの前回値を記憶
+//        TriggerLPF[0] = TriggerLPF[1];
+//        if(abs(MODE-preMODE)>0.9){
+//            EndTrigger++;
+//        }
+//        preMODE = MODE;
+//    }
+//}
 
 
 /* ---------------
@@ -306,11 +235,175 @@ void RespiratoryAssist(){
     // 待機設定に戻す
     e[0] = 0; e[1] = 0;
     t[0] = 0; t[1] = 0;
-    //M5.Lcd.setCursor(10, 10);
-    //M5.Lcd.clear(BLACK);
-    //M5.Lcd.setTextColor(RED, BLACK);
-    //M5.Lcd.setTextSize(3);
-    //M5.Lcd.print("WAITING\n");
     dacWrite(CONTROL, (minCnt/3.3)*255);
     start = millis() / 1000;
+}
+
+
+
+/* ---------------
+... 画面描画用関数 ...
+--------------- */
+void test_task0(void *arg){
+    Wire.begin();
+
+    treeView.useFACES       = true;
+    treeView.useCardKB      = true;
+    treeView.useJoyStick    = true;
+    treeView.usePLUSEncoder = true;
+    treeView.useFACESEncoder= true;
+    treeView.clientRect.x = 2;
+    treeView.clientRect.y = 10;
+    treeView.clientRect.w = 316;
+    treeView.clientRect.h = 216;
+
+    treeView.setItems(vmi
+                    { new MenuItem("main 1", 1, vmi
+                    { new MenuItem("sub 1-1", 11, vmi
+                        { new MenuItem("sub 1-1-1", 111)
+                        } )
+                    } )
+                    , new MenuItem("main 2", vmi
+                    { new MenuItem("sub 2-1", vmi
+                        { new MenuItem("sub 2-1-1", 211)
+                        , new MenuItem("sub 2-1-2", 212)
+                        } )
+                    , new MenuItem("sub 2-2", vmi
+                        { new MenuItem("sub 2-2-1", 221)
+                        , new MenuItem("sub 2-2-2", 222)
+                        } )
+                    } )
+                    , new MenuItem("main 3", vmi
+                    { new MenuItem("sub 3-1", vmi
+                        { new MenuItem("sub 3-1-1", vmi
+                        { new MenuItem("sub 3-1-1-1", 3111)
+                        , new MenuItem("sub 3-1-1-2", 3112)
+                        , new MenuItem("sub 3-1-1-3", 3113)
+                        } )
+                        , new MenuItem("sub 3-1-2", vmi
+                        { new MenuItem("sub 3-1-2-1", 3121)
+                        , new MenuItem("sub 3-1-2-2", 3122)
+                        , new MenuItem("sub 3-1-2-3", 3123)
+                        } )
+                        , new MenuItem("sub 3-1-3", vmi
+                        { new MenuItem("sub 3-1-3-1", 3131)
+                        , new MenuItem("sub 3-1-3-2", 3132)
+                        , new MenuItem("sub 3-1-3-3", 3133)
+                        } )
+                        } )
+                    , new MenuItem("sub 3-2", vmi
+                        { new MenuItem("sub 3-2-1", vmi
+                        { new MenuItem("sub 3-2-1-1", 3211)
+                        , new MenuItem("sub 3-2-1-2", 3212)
+                        , new MenuItem("sub 3-2-1-3", 3213)
+                        } )
+                        , new MenuItem("sub 3-2-2", 322)
+                        , new MenuItem("sub 3-2-3", 323)
+                        } )
+                    , new MenuItem("sub 3-3", vmi
+                        { new MenuItem("sub 3-3-1", vmi
+                        { new MenuItem("sub 3-3-1-1", 3311)
+                        , new MenuItem("sub 3-3-1-2", 3312)
+                        , new MenuItem("sub 3-3-1-3", 3313)
+                        } )
+                        , new MenuItem("sub 3-3-2", 332)
+                        , new MenuItem("sub 3-3-3", vmi
+                        { new MenuItem("sub 3-3-3-1", 3331)
+                        , new MenuItem("sub 3-3-3-2", 3332)
+                        , new MenuItem("sub 3-3-3-3", 3333)
+                        } )
+                        } )
+                    } )
+                    }
+                );
+    treeView.begin();
+    while(1){
+        MenuItem* mi = treeView.update();
+        if (mi != NULL) {
+            M5.Lcd.fillRect(0,0,320,8,0);
+            M5.Lcd.setTextColor(0xffff,0);
+            M5.Lcd.setTextSize(1);
+            M5.Lcd.drawString("menu:" + mi->title + " / tag:" + mi->tag, 15, 0, 1);
+        }
+        delay(1);
+    }
+}
+
+/* ---------------
+... 制御関数 ...
+--------------- */
+void test_task1(void *arg){
+    /* ----
+    初期設定
+    ---- */
+    int temp = (int)(minCnt*255/3.3);
+    dacWrite(CONTROL, temp);
+    delay(5000);                 // 最初は5秒間待機
+    /* ----
+    制御開始
+    ---- */
+    start = millis() / 1000;
+    while(1){
+        /* -------------------------------------
+        main関数内でのみ扱う変数：local変数として宣言
+        ------------------------------------- */
+        // 自律トリガ用パラメタ
+        float backup = 0;
+        // 随意トリガ用パラメタ
+        int GoSign = 0;          // 定常状態にまで落ちてきたらON
+
+        while(EndTrigger < 8){
+            /* --------------
+            自律トリガ用パラメタ
+            -------------- */
+            // 吸気時間の調整
+            intime = 2.0;
+            //intime = INTIME+2;   // 正確には(3.3*INTIME)*(2/3.3)+2
+            // バックアップ換気の間隔
+            backup = intime*2;     // I:E比の比率だけ乗算
+
+            /* --------------
+            随意トリガ用パラメタ
+            -------------- */
+            // 流量センサ値の物理量化と平滑化
+            TriggerRaw = 37.5*(analogRead(FLOW)/4096)*3.3 - 68.75;
+            TriggerLPF[1] = 0.8*TriggerLPF[0] + 0.2*TriggerRaw;
+            // GoSignの更新
+            if((GoSign==0)&&(TriggerLPF[1]<11)){
+                GoSign = 1;
+            }
+
+            /* ----
+            吸気支援
+            ---- */
+            // 随意制御
+            end = millis() / 1000;
+            diff = end - start;
+            /*
+            if((GoSign==1)&&(17<TriggerLPF[1])&&(diff>1)){
+                digitalWrite(TRIGGER, HIGH);
+                digitalWrite(ASSIST, HIGH);
+                RespiratoryAssist();
+                digitalWrite(TRIGGER, LOW);
+                digitalWrite(ASSIST, LOW);
+                GoSign = 0;
+            }*/
+            // 自律制御
+            if(diff>backup){
+                digitalWrite(ASSIST, HIGH);
+                RespiratoryAssist();
+                digitalWrite(ASSIST, LOW);
+                GoSign = 0;
+            }
+
+            // 随意トリガ用パラメタの前回値を記憶
+            TriggerLPF[0] = TriggerLPF[1];
+            if(abs(MODE-preMODE)>0.9){
+                EndTrigger++;
+            }
+            preMODE = MODE;
+            delay(1);
+        }
+        delay(1);
+    }
 }
