@@ -32,6 +32,6 @@
 *.app
 
 .DS_Store
-
+.vscode
 /m5stack_control/libraries
 /m5stack_control/M5Stack-SD-Updater-master
