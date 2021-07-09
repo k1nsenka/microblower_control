@@ -10,10 +10,10 @@ define
 #define kpP 0.50           // PCV用 ***
 #define kdP 0.012          // PCV用 ***
 // モータ制御電圧の上限・下限
-#define minCnt 39.02       // 0.505v 遠心ポンプのドライバが駆動する制御電圧の下限
-#define maxCnt 247.66    // 3.205v 回路的に念のために設ける上限
-#define FLOWBIAS 121.48   //流量センサのバイアス
-#define PRESSUREBIAS 171  //圧力センサのバイアス
+#define minCnt 39.02       // 遠心ポンプのドライバが駆動する制御電圧の下限
+#define maxCnt 247.66    // 回路的に念のために設ける上限
+// 制御周期
+#define ControlCycle 0.002  // 50Hzの制御周期
 //　m5stackのボタンピン番号
 #define BUTTONA 39
 #define BUTTONB 38
@@ -38,10 +38,10 @@ typedef std::vector<MenuItem*> vmi;
 制御パラメタ設定
 二つのタスクで共通化
 ------------- */
-volatile float S_TARGET = 0.5;      // 流量or圧力調整 ***0-1
-volatile float S_INTIME = 0;      // 吸気時間調整0-1
+volatile float S_TARGET = 0.5;      // 流量or圧力調整 ***
+volatile float S_INTIME = 0;      // 吸気時間調整
 volatile float S_MODE = 0;        // モード切替[0:VCV][1:PCV] ***
-volatile float S_TORIGGER = 14;  //閾値の設定10-20
+volatile float S_TORIGGER = 14;  //閾値の設定
 
 /* -----------
 データロガー用変数
@@ -50,7 +50,7 @@ File file;
 unsigned int log_start = 0;
 unsigned int log_end = 0;
 unsigned int log_diff = 0;
-const char* fname = "/param_test_data_log.csv";
+const char* fname = "/data_log.csv";
 float log_flow_sensor;
 float log_flow_v;
 float log_flow;
@@ -72,7 +72,9 @@ float intime;              // 吸気時間対応
 float raw;                 // 流量or圧力センサの生値 ***
 float e[2];                // 制御偏差
 float t[2];                // 時間
-float checkCONTROL;        // 制御入力の[min-max]包含チェック
+float preTime;
+float dt;                  // D制御に用いる時間差分
+float checkCONTROL = 0;        // 制御入力の[min-max]包含チェック
 float preCONTROL;          // 前回の制御入力
 float temp_cnt;
 float p,d;                 // PD制御
@@ -109,13 +111,13 @@ void RespiratoryAssist(){
     /* -----------
     制御周期カウンタ
     ----------- */
-    unsigned int ControlCycleCount = 0;
+    float ControlCycleCount = 0;
     /* -------
     吸気支援開始
     ------- */
     end = start;
     diff = end - start;
-    while(diff<=(intime-1)){
+    while(1){
         /* -----------
         流量or圧力の調整
         ----------- */
@@ -125,20 +127,24 @@ void RespiratoryAssist(){
         else{
             target = S_TARGET*1.911 + 1.389;          // 正確には(3.3*TARGET)*(1.911/3.3)+1.389 ***
         }
+        //preTime = millis();
+        // 制御周期を一定で実施
+        // D制御のための時間記憶
         // 自発呼吸トリガ用パラメタ
         flow_sensor = analogRead(FLOW);
-        press_sensor = analogRead(PRESSURE);
-        TriggerRaw = 37.5*((flow_sensor+FLOWBIAS)/4096)*3.3 - 68.75;
+        TriggerRaw = 37.5*((flow_sensor+2143)/4096)*3.3 - 68.75;
         TriggerLPF[1] = 0.8*TriggerLPF[0] + 0.2*TriggerRaw;
         // P:比例制御 ***
         if(S_MODE<0.5){
-            raw = ((flow_sensor+FLOWBIAS)/4096)*3.3;
+            raw = ((flow_sensor+2143)/4096)*3.3;
         }else{
-            raw = ((press_sensor+PRESSUREBIAS)/4096)*3.3;
+            press_sensor = analogRead(PRESSURE);
+            raw = (press_sensor/4096)*3.3;
         }
         e[1] = target - raw;                                         // 偏差を記憶 ***
         p = (ControlCycleCount==0) ? 0 : e[1];                       // 原始ループでのP制御は不実施
         // D:微分制御
+        //dt =  (millis() - preTime);
         d = (ControlCycleCount==0) ? 0 : (e[1]-e[0]);             // 原始ループでのD制御は不実施
         // PD:比例微分制御 ***
         preCONTROL = (ControlCycleCount==0) ? minCnt : preCONTROL; // 原始ループでのpreCONTROLはminCnt*2に設定
@@ -169,7 +175,7 @@ void RespiratoryAssist(){
         e[0] = e[1];
         TriggerLPF[0] = TriggerLPF[1];
         // 制御周期カウンタのインクリメント
-        ControlCycleCount++;
+        ControlCycleCount += ControlCycle;
         end = millis() / 1000;
         diff = end - start;
         delay(1);
@@ -377,12 +383,12 @@ void display_task(void *arg){
         log_diff += log_end - log_start;
         //流量計算
         log_flow_sensor = analogRead(FLOW);
-        log_flow_v = ((log_flow_sensor+FLOWBIAS)/4096)*3.3;
+        log_flow_v = ((log_flow_sensor+2143)/4096)*3.3;
         log_flow = 37.5*log_flow_v - 68.75;
         log_flow_LPF[1] = 0.8*log_flow_LPF[0] + 0.2*log_flow;
         //圧力計算
         log_pressure_sensor = analogRead(PRESSURE);
-        log_pressure_v = ((log_pressure_sensor+PRESSUREBIAS)/4096)*3.3;
+        log_pressure_v = (log_pressure_sensor/4096)*3.3;
         log_pressure = 11.249*log_pressure_v - 10.622;
         log_pressure_LPF[1] = 0.8*log_pressure_LPF[0] + 0.2*log_pressure;
         //ASSIST, TRIGGER
@@ -392,6 +398,8 @@ void display_task(void *arg){
         file = SD.open(fname, FILE_APPEND);
         file.println(
             (String)log_diff + "," + 
+            (String)p + "," + 
+            (String)d + "," + 
             (String)target + "," + 
             (String)log_pressure_v + "," +
             (String)log_flow_v + "," + 
@@ -401,7 +409,6 @@ void display_task(void *arg){
             (String)log_flow_sensor + "," + 
             (String)log_flow + "," + 
             (String)log_flow_LPF[1] + "," + 
-            (String)log_pressure_sensor + "," +
             (String)log_pressure + "," + 
             (String)log_pressure_LPF[1] + "," +
             (String)log_ASSIST + "," +
@@ -422,7 +429,7 @@ void control_task(void *arg){
     /* ----
     初期設定
     ---- */
-    dacWrite(CONTROL, minCnt);
+    dacWrite(CONTROL, 0);
     delay(5000);                 // 最初は5秒間待機
     /* ----
     制御開始
@@ -446,7 +453,7 @@ void control_task(void *arg){
             -------------- */
             // 流量センサ値の物理量化と平滑化
             flow_sensor = analogRead(FLOW);
-            TriggerRaw = 37.5*((flow_sensor+FLOWBIAS)/4096)*3.3 - 68.75;
+            TriggerRaw = 37.5*((flow_sensor+2143)/4096)*3.3 - 68.75;
             TriggerLPF[1] = 0.8*TriggerLPF[0] + 0.2*TriggerRaw;
             // GoSignの更新
             if((GoSign==0)&&(TriggerLPF[1]<11)){
@@ -458,14 +465,6 @@ void control_task(void *arg){
             // 随意制御
             end = millis() / 1000;
             diff = end - start;
-            if((GoSign==1)&&(17<TriggerLPF[1])&&(diff>1)){
-                digitalWrite(TRIGGER, HIGH);
-                digitalWrite(ASSIST, HIGH);
-                RespiratoryAssist();
-                digitalWrite(TRIGGER, LOW);
-                digitalWrite(ASSIST, LOW);
-                GoSign = 0;
-            }
             // 自律制御
             if(diff>backup){
                 digitalWrite(ASSIST, HIGH);
